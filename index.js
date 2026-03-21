@@ -7,17 +7,32 @@ const adminRoutes = require('./Routes/AdminRoutes');
 
 const app = express();
 
+app.use(cors());
+app.use(bodyParser.json());
+
+
 app.use(
   cors({
     origin: [
+      // Local
       "http://localhost:5173",
       "http://localhost:3000",
-      "https://quiz-app-orcin-kappa.vercel.app",
+
+      // Delivery frontend
+      // "https://quiz-app-swart-iota.vercel.app",
+      // "https://quiz-app-orcin-kappa.vercel.app",
+      "https://quiz-app-chinna.vercel.app"
+      // "https://quiz-app-orcin-kappa.vercel.app"
+      // "https://quiz-app-git-main-chinna.vercel.app",
+
+      // ChinnaMart frontend
+    //   "https://chinnamart.vercel.app",
+    //   "https://chinnamart.vercel.app/",
+    //   "https://chinnamart-git-main-chinna0107s-projects.vercel.app"
     ],
     credentials: true,
   })
 );
-app.use(bodyParser.json());
 
 
 app.use('/api/users', userRoutes);
