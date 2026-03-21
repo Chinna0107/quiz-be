@@ -6,6 +6,12 @@ const pool = require('../database');
 require('dotenv').config();
 const router = express.Router();
 
+const normalizeText = (v) =>
+  (v ?? '')
+    .toString()
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
 // Generate random OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -298,8 +304,10 @@ router.get('/quiz/:id', async (req, res) => {
       const correctIndex = optionsResult.rows.findIndex(o => o.is_correct);
       questions.push({
         id: question.id,
-        question_text: question.question_text,
-        options: optionsResult.rows.map(o => ({ option_text: o.option_text })),
+        type: question.type || 'mcq',
+        question_text: normalizeText(question.question_text),
+        answer: question.answer || '',
+        options: optionsResult.rows.map(o => ({ option_text: normalizeText(o.option_text) })),
         correct_option: correctIndex >= 0 ? correctIndex : 0
       });
     }
@@ -315,61 +323,33 @@ router.get('/quiz/:id', async (req, res) => {
 router.post('/quiz/:id/submit', async (req, res) => {
   const { id } = req.params;
   const { answers, userId } = req.body;
-  console.log('Submitting quiz with id:', id);
-  
+
   try {
-    // Get quiz by quiz_key_id first
-    let quizResult = await pool.query(
-      'SELECT id FROM quizzes WHERE quiz_key_id = $1',
-      [id]
-    );
-    
-    let quizId;
-    let questionsResult;
-    
+    let quizResult = await pool.query('SELECT id FROM quizzes WHERE quiz_key_id = $1', [id]);
     if (quizResult.rows.length === 0) {
-      // Try fallback with numeric ID
-      quizResult = await pool.query(
-        'SELECT id FROM quizzes WHERE id = $1',
-        [id]
-      );
-      
-      if (quizResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Quiz not found' });
-      }
-      
-      quizId = quizResult.rows[0].id;
-      
-      // Get questions by quiz_id for fallback
-      questionsResult = await pool.query(
-        'SELECT * FROM questions WHERE quiz_id = $1 ORDER BY id',
-        [quizId]
-      );
-    } else {
-      quizId = quizResult.rows[0].id;
-      
-      // Get questions by quiz_key_id
-      questionsResult = await pool.query(
-        'SELECT * FROM questions WHERE quiz_key_id = $1 ORDER BY id',
-        [id]
-      );
+      quizResult = await pool.query('SELECT id FROM quizzes WHERE id = $1', [id]);
     }
-    
+    if (quizResult.rows.length === 0) return res.status(404).json({ error: 'Quiz not found' });
+
+    const quizId = quizResult.rows[0].id;
+    const questionsResult = await pool.query('SELECT * FROM questions WHERE quiz_id = $1 ORDER BY id', [quizId]);
+
     let score = 0;
     const totalQuestions = questionsResult.rows.length;
-    
+
     for (let i = 0; i < questionsResult.rows.length; i++) {
       const question = questionsResult.rows[i];
       const userAnswer = answers[i];
-      
+
       if (userAnswer !== undefined) {
-        const optionsResult = await pool.query(
-          'SELECT * FROM options WHERE question_id = $1 ORDER BY id',
-          [question.id]
-        );
-        
-        if (optionsResult.rows[userAnswer] && optionsResult.rows[userAnswer].is_correct) {
-          score++;
+        if (question.type === 'fill') {
+          const correct = normalizeText(question.answer).trim().toLowerCase();
+          const given   = normalizeText(userAnswer).trim().toLowerCase();
+          if (correct && correct === given) score++;
+        } else {
+          const optionsResult = await pool.query('SELECT * FROM options WHERE question_id = $1 ORDER BY id', [question.id]);
+          const correctIndex = optionsResult.rows.findIndex(o => o.is_correct);
+          if (parseInt(userAnswer) === correctIndex) score++;
         }
       }
     }

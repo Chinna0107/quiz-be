@@ -3,42 +3,50 @@ const pool = require('../database');
 const adminAuth = require('../middleware/Admin');
 const router = express.Router();
 
+const normalizeText = (v) =>
+  (v ?? '')
+    .toString()
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
 // Create quiz
 router.post('/create-quiz', adminAuth, async (req, res) => {
-  console.log(" called")
   const { title, description, timer, questions } = req.body;
-  
+
   if (!title || !questions || questions.length === 0) {
     return res.status(400).json({ error: 'Title and questions are required' });
   }
-  
+
   try {
-    // Generate unique quiz_key_id
-    const quizKeyId = title.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
-    
+    const quizKeyId =
+      title.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') +
+      '-' + Date.now();
+
     const quizResult = await pool.query(
       'INSERT INTO quizzes (title, description, timer, quiz_key_id, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id, quiz_key_id',
-      [title, description, timer || null, quizKeyId, req.user.id]
+      [normalizeText(title), normalizeText(description), timer || null, quizKeyId, req.user.id]
     );
-    
+
     const quizId = quizResult.rows[0].id;
-    
+
     for (const q of questions) {
+      const questionText = normalizeText(q.question_text ?? q.question);
       const questionResult = await pool.query(
-        'INSERT INTO questions (quiz_id, quiz_key_id, question_text) VALUES ($1, $2, $3) RETURNING id',
-        [quizId, quizKeyId, q.question]
+        'INSERT INTO questions (quiz_id, question_text) VALUES ($1, $2) RETURNING id',
+        [quizId, questionText]
       );
-      
       const questionId = questionResult.rows[0].id;
-      
+
       for (let i = 0; i < q.options.length; i++) {
+        const opt = q.options[i];
+        const optionText = normalizeText(opt?.option_text ?? opt);
         await pool.query(
           'INSERT INTO options (question_id, option_text, is_correct) VALUES ($1, $2, $3)',
-          [questionId, q.options[i], i === q.correctAnswer]
+          [questionId, optionText, i === (q.correct_option ?? q.correctAnswer)]
         );
       }
     }
-    
+
     res.json({ message: 'Quiz created successfully', quizId });
   } catch (error) {
     console.error('Error:', error);
@@ -161,8 +169,8 @@ router.get('/quiz/:id', adminAuth, async (req, res) => {
       const correctIndex = optionsResult.rows.findIndex(o => o.is_correct);
       questions.push({
         id: q.id,
-        question_text: q.question_text,
-        options: optionsResult.rows.map((o, i) => ({ option_text: o.option_text })),
+        question_text: normalizeText(q.question_text),
+        options: optionsResult.rows.map(o => ({ option_text: normalizeText(o.option_text) })),
         correct_option: correctIndex >= 0 ? correctIndex : 0
       });
     }
@@ -185,24 +193,24 @@ router.put('/quiz/:id', adminAuth, async (req, res) => {
   try {
     await pool.query(
       'UPDATE quizzes SET title = $1, description = $2, timer = $3 WHERE id = $4',
-      [title, description, timer || null, id]
+      [normalizeText(title), normalizeText(description), timer || null, id]
     );
 
     await pool.query('DELETE FROM questions WHERE quiz_id = $1', [id]);
 
-    const quizKeyResult = await pool.query('SELECT quiz_key_id FROM quizzes WHERE id = $1', [id]);
-    const quizKeyId = quizKeyResult.rows[0].quiz_key_id;
-
     for (const q of questions) {
+      const questionText = normalizeText(q.question_text ?? q.question);
       const questionResult = await pool.query(
-        'INSERT INTO questions (quiz_id, quiz_key_id, question_text) VALUES ($1, $2, $3) RETURNING id',
-        [id, quizKeyId, q.question_text]
+        'INSERT INTO questions (quiz_id, question_text) VALUES ($1, $2) RETURNING id',
+        [id, questionText]
       );
       const questionId = questionResult.rows[0].id;
       for (let i = 0; i < q.options.length; i++) {
+        const opt = q.options[i];
+        const optionText = normalizeText(opt?.option_text ?? opt);
         await pool.query(
           'INSERT INTO options (question_id, option_text, is_correct) VALUES ($1, $2, $3)',
-          [questionId, q.options[i].option_text, i === q.correct_option]
+          [questionId, optionText, i === (q.correct_option ?? q.correctAnswer)]
         );
       }
     }
